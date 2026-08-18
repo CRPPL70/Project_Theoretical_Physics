@@ -58,6 +58,8 @@ dkms.conf
 # debug information files
 *.dwo
 
+on_the_fly.c
+
 ##########
 # Python #
 ##########

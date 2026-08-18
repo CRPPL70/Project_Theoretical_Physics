@@ -58,13 +58,15 @@ gen = LagrangianToC(L, [x, y])
 c_equations = gen.generate_c_function("generated_eqs", collapse_constants=True)
 
 # 1c. Wrap the generated code. 
-# Using .as_posix() ensures forward slashes are used even on Windows, preventing C-string escape errors.
+# Added OpenMP pragma here as well to parallelize the derivative mapping calculation!
 wrapper_c_code = f"""#include "{SOLVER_C_PATH.as_posix()}"
+#include <omp.h>
 
 {c_equations}
 
 /* Adapter that bridges the single-particle float array logic to Vector2D arrays */
 void dfdx_wrapper(Vector2D* q, Vector2D* dq, Vector2D* _dq, Vector2D* _ddq, float t, size_t N) {{
+    #pragma omp parallel for
     for(size_t i=0; i<N; ++i) {{
         float temp_q[2]    = {{q[i].x, q[i].y}};
         float temp_dq[2]   = {{dq[i].x, dq[i].y}};
@@ -88,8 +90,12 @@ with open(on_the_fly_src, "w") as f:
     f.write(wrapper_c_code)
 
 # === 2. C LIBRARY COMPILATION & LOADING ===
-print("Compiling the generated C code...")
-ccompiler = CSharedLibraryCompiler(source_file=str(on_the_fly_src))
+print("Compiling the generated C code with OpenMP support...")
+# Added the "-fopenmp" flag here to link the OpenMP multithreading library
+ccompiler = CSharedLibraryCompiler(
+    source_file=str(on_the_fly_src),
+    flags=["-Wall", "-pedantic", "-Ofast", "-Wextra", "-fopenmp", "-static"]
+)
 __solver_path = ccompiler.compile()
 _libsolver    = cp.EOMSolver(__solver_path, NUMBER_OF_PARTICLES, DIMENSIONS=2)
 

@@ -1,4 +1,5 @@
 #include "C:/Users/pwite/OneDrive/Dokumente/003_original/solver/solver.c"
+#include <omp.h>
 
 void generated_eqs(float* q, float* dq, float* _dq, float* _ddq, float t, size_t N) {
     // Auto-generated Euler-Lagrange Equations using sympy.physics.mechanics
@@ -12,6 +13,7 @@ return;
 
 /* Adapter that bridges the single-particle float array logic to Vector2D arrays */
 void dfdx_wrapper(Vector2D* q, Vector2D* dq, Vector2D* _dq, Vector2D* _ddq, float t, size_t N) {
+    #pragma omp parallel for
     for(size_t i=0; i<N; ++i) {
         float temp_q[2]    = {q[i].x, q[i].y};
         float temp_dq[2]   = {dq[i].x, dq[i].y};
