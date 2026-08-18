@@ -188,20 +188,29 @@ void RK4_2D(Vector2D* x, Vector2D* v, Vector2D* dx, Vector2D* dv, float t, float
 	return;
 }
 
-
 /*
- * Calculates the next 2D coordinates and velocities
+ * Calculates the next 2D coordinates and velocities using dynamically generated derivatives via RK4
  */
+void next_2D(Vector2D* coord, Vector2D* vel, Vector2D* new_coord, Vector2D* new_vel, float t, float dt, size_t N, void(*f)(Vector2D*,Vector2D*,Vector2D*,Vector2D*,float,size_t)){
+	// Allocate arrays for output of RK4_2D (the rates of change)
+	Vector2D* dx = malloc(N * sizeof(Vector2D));
+	Vector2D* dv = malloc(N * sizeof(Vector2D));
 
-void next_2D(Vector2D* coord, Vector2D* vel, Vector2D* new_coord, Vector2D* new_vel, float dt, size_t N){
-	/* Calculating new coordinates */
+	// Pass arrays and the derived-function pointer 'f' into RK4_2D
+	RK4_2D(coord, vel, dx, dv, t, dt, f, N);
+
+	/* Calculating new coordinates based on the obtained RK4 derivatives */
 	for(size_t i=0U; i<N; ++i){
-		new_coord[i].x = coord[i].x + dt*RK4(coord[i].x,vel[i].x,dt,&dxdt);
-		new_coord[i].y = coord[i].y + dt*RK4(coord[i].y,vel[i].y,dt,&dxdt);
+		new_coord[i].x = coord[i].x + dt * dx[i].x;
+		new_coord[i].y = coord[i].y + dt * dx[i].y;
 
-		new_vel[i].x = vel[i].x + dt*RK4(coord[i].x,vel[i].x,dt,&dvdt);
-		new_vel[i].y = vel[i].y + dt*RK4(coord[i].y,vel[i].y,dt,&dvdt);
+		new_vel[i].x = vel[i].x + dt * dv[i].x;
+		new_vel[i].y = vel[i].y + dt * dv[i].y;
 	}
+
+	// Cleanup
+	free(dx);
+	free(dv);
 	return;
 }
 
@@ -317,4 +326,3 @@ void next_3D(Vector3D* coord, Vector3D* vel, Vector3D* new_coord, Vector3D* new_
 	}
 	return;
 }
-
