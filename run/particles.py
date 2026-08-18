@@ -3,6 +3,7 @@
 from sys import argv
 import os
 import ctypes
+from pathlib import Path
 
 # Third party imports
 import numpy as np
@@ -28,6 +29,12 @@ else:
 RADIUS              = 2.0    # Initial radius for particle placement
 dt                  = 0.01   # Timestep for the simulation
 
+# === DIRECTORY SETUP ===
+# Dynamically resolve absolute paths to ensure the script works regardless of where it is executed from
+RUN_DIR = Path(__file__).parent.resolve()
+SOLVER_DIR = (RUN_DIR / "../solver").resolve()
+SOLVER_C_PATH = SOLVER_DIR / "solver.c"
+
 # === 1. DEFINE LAGRANGIAN AND GENERATE C CODE ON THE FLY ===
 print("Generating Lagrangian mechanics C code on the fly...")
 
@@ -50,8 +57,9 @@ L = L.subs({m_sym: 1.0, k_sym: 5.0})
 gen = LagrangianToC(L, [x, y])
 c_equations = gen.generate_c_function("generated_eqs", collapse_constants=True)
 
-# 1c. Wrap the generated code to bridge the float* generator with the Vector2D* multi-particle arrays
-wrapper_c_code = f"""#include "../solver/solver.c"
+# 1c. Wrap the generated code. 
+# Using .as_posix() ensures forward slashes are used even on Windows, preventing C-string escape errors.
+wrapper_c_code = f"""#include "{SOLVER_C_PATH.as_posix()}"
 
 {c_equations}
 
@@ -74,19 +82,19 @@ void dfdx_wrapper(Vector2D* q, Vector2D* dq, Vector2D* _dq, Vector2D* _ddq, floa
 }}
 """
 
-# 1d. Write the customized code to a temporary C file
-on_the_fly_src = "on_the_fly.c"
+# 1d. Write the customized code strictly to the run directory
+on_the_fly_src = RUN_DIR / "on_the_fly.c"
 with open(on_the_fly_src, "w") as f:
     f.write(wrapper_c_code)
 
 # === 2. C LIBRARY COMPILATION & LOADING ===
 print("Compiling the generated C code...")
-ccompiler = CSharedLibraryCompiler(source_file=on_the_fly_src)
+ccompiler = CSharedLibraryCompiler(source_file=str(on_the_fly_src))
 __solver_path = ccompiler.compile()
 _libsolver    = cp.EOMSolver(__solver_path, NUMBER_OF_PARTICLES, DIMENSIONS=2)
 
 # === 3. SET UP CALLBACK FUNCTION FOR NEXT_2D ===
-# Inform ctypes of the signature of the injected C wrapper: void(*f)(Vector2D*,Vector2D*,Vector2D*,Vector2D*,float,size_t)
+# Inform ctypes of the signature of the injected C wrapper
 CALLBACK_TYPE = ctypes.CFUNCTYPE(
     None, 
     ctypes.POINTER(cp.Vector2D), ctypes.POINTER(cp.Vector2D), 
@@ -96,7 +104,9 @@ CALLBACK_TYPE = ctypes.CFUNCTYPE(
 
 # Extract the wrapped function pointer from the compiled `.so` library
 dfdx_c_func = getattr(_libsolver.lib, "dfdx_wrapper")
-cb_func = CALLBACK_TYPE(dfdx_c_func)
+
+# Cast the C function directly to the callback pointer type to keep the loop entirely in C
+cb_func = ctypes.cast(dfdx_c_func, CALLBACK_TYPE)
 
 # Override argtypes for next_step (which currently maps to next_2D)
 _libsolver.next_step.argtypes = [
@@ -108,14 +118,17 @@ _libsolver.next_step.argtypes = [
 # Provide a Python wrapper to bridge our 8-argument C call back to the 6-argument layout expected by Animation2D
 def custom_next_step(pos, vel, new_pos, new_vel, dt, N):
     t = 0.0  # Time variable for an autonomous physical system
-    _libsolver.next_step(pos, vel, new_pos, new_vel, t, dt, N, cb_func)
-
+    _libsolver.next_step(
+        pos, vel, new_pos, new_vel, 
+        ctypes.c_float(t), ctypes.c_float(dt), ctypes.c_size_t(N), 
+        cb_func
+    )
 
 # === INITIAL CONDITIONS ===
 positions = [_libsolver.vector(x=RADIUS * np.cos(2 * np.pi * i / NUMBER_OF_PARTICLES),
                                y=RADIUS * np.sin(2 * np.pi * i / NUMBER_OF_PARTICLES))
              for i in range(NUMBER_OF_PARTICLES)]
-# Add rotational velocity for a beautiful visual path
+
 velocities = [_libsolver.vector(x=-np.sin(2 * np.pi * i / NUMBER_OF_PARTICLES), 
                                 y=np.cos(2 * np.pi * i / NUMBER_OF_PARTICLES)) 
               for i in range(NUMBER_OF_PARTICLES)]
@@ -123,7 +136,7 @@ velocities = [_libsolver.vector(x=-np.sin(2 * np.pi * i / NUMBER_OF_PARTICLES),
 # === PLOTTING SETUP ===
 ani = anim.Animation2D(vector_factory=_libsolver.vector,
                        c_arr=_libsolver.c_arr,
-                       next_step=custom_next_step, # Route to our newly defined wrapper
+                       next_step=custom_next_step,
                        positions=positions,
                        velocities=velocities,
                        dt=dt,

@@ -1,4 +1,4 @@
-#include "../solver/solver.c"
+#include "C:/Users/pwite/OneDrive/Dokumente/003_original/solver/solver.c"
 
 void generated_eqs(float* q, float* dq, float* _dq, float* _ddq, float t, size_t N) {
     // Auto-generated Euler-Lagrange Equations using sympy.physics.mechanics
